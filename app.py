@@ -1,4 +1,6 @@
-from flask import Flask, request, send_file
+from flask import Flask, request, send_file, jsonify
+from flask_pymongo import PyMongo
+from bson import json_util
 import json
 import requests
 import random
@@ -21,13 +23,22 @@ desc['Hunter'] = 'ทีม [Villager] \uDBC0\uDC90\n   มี Passive Ability �
 desc['Villager'] = 'ทีม [Villager] \uDBC0\uDC90\n   ทำอะไรไม่ได้นอกจากบัฟคนอื่นและช่วยหาหมาป่า \uDBC0\uDC95|\uDBC0\uDC77 Tip!\n    พยายามช่วยทีมละกันนะ สู้ๆ 5555'
 
 global LINE_API_KEY
-LINE_API_KEY = 'Bearer TggCqD9x2zDV6JxA2lmx5toFM4MfLy6l5ocDsc9OfphBAIQxrXj6ul7ulst06le6afdnqu0l/n8gdOpbLsj0l2h0n7Qc8pKxcCDIipOW+hsFH39t6ykcMpGXtRrpx+ghifLmLDczIUSP+sZgf2yCwgdB04t89/1O/w1cDnyilFU='
+LINE_API_KEY = 'Bearer token'
 
 app = Flask(__name__)
 
+app.config['MONGO_DBNAME'] = 'werewolf'
+app.config['MONGO_URI'] = 'mongodb://localhost:27017/werewolf'
+
+mongo = PyMongo(app)
+
 @app.route('/')
 def index():
-    return 'This is chatbot server.'
+    room = mongo.db.rooms
+    # room_id = room.insert({'id': '1111', 'creator': 'pun'})
+    room = room.find()
+    data = [json.dumps(r, default=json_util.default) for r in room]
+    return jsonify(data=data)
 
 @app.route('/img')
 def img():
