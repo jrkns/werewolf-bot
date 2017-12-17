@@ -4,7 +4,11 @@ from bson import json_util
 import json
 import requests
 import random
+import string
+import Constant
 
+global room_map
+room_map = dict()
 global roles
 roles = ['']*5
 roles.append('Werewolf Doctor Seer Hunter Villager')
@@ -23,21 +27,20 @@ desc['Hunter'] = 'ทีม [Villager] \uDBC0\uDC90\n   มี Passive Ability �
 desc['Villager'] = 'ทีม [Villager] \uDBC0\uDC90\n   ทำอะไรไม่ได้นอกจากบัฟคนอื่นและช่วยหาหมาป่า \uDBC0\uDC95|\uDBC0\uDC77 Tip!\n    พยายามช่วยทีมละกันนะ สู้ๆ 5555'
 
 global LINE_API_KEY
-LINE_API_KEY = 'Bearer token'
+LINE_API_KEY = 'Bearer ' + Constant.Token
 
 app = Flask(__name__)
 
 app.config['MONGO_DBNAME'] = 'werewolf'
-app.config['MONGO_URI'] = 'mongodb://localhost:27017/werewolf'
+app.config['MONGO_URI'] = Constant.MONGO_URI
 
 mongo = PyMongo(app)
 
 @app.route('/')
 def index():
-    room = mongo.db.rooms
-    # room_id = room.insert({'id': '1111', 'creator': 'pun'})
-    room = room.find()
-    data = [json.dumps(r, default=json_util.default) for r in room]
+    room_model = mongo.db.rooms
+    rooms = room_model.find({'id': '1111'})
+    data = [json.dumps(r, default=json_util.default) for r in rooms]
     return jsonify(data=data)
 
 @app.route('/img')
@@ -48,12 +51,15 @@ def img():
 @app.route('/bot', methods=['POST'])
 def bot():
     #locked = getLockingStatus()
+    room_model = mongo.db.rooms
+    player_model = mongo.db.players
     replyStack = []
     msg_in_json = request.get_json()
     msg_in_string = json.dumps(msg_in_json)
     replyToken = msg_in_json["events"][0]['replyToken']
 
     userID =  msg_in_json["events"][0]['source']['userId']
+    name = getProfiles(userID)['displayName']
     msgType =  msg_in_json["events"][0]['message']['type']
     
     if msgType != 'text':
@@ -61,6 +67,7 @@ def bot():
         return 'OK',200
     
     text = msg_in_json["events"][0]['message']['text'].lower().strip()
+    words = text.split()
     '''
     if text in ['!lock','!locked']:
         lock()
@@ -80,22 +87,38 @@ def bot():
         reply(replyToken, replyStack)
         return 'OK',200
     '''
-    if text in ['join','play','เล่น','เล่นด้วย']:
-        # Acknowledge all player that already in room.
-        name = getProfiles(userID)['displayName']
-        number_of_player = countPlayer()+1
-        with open('db/registered.txt','r') as data_file:
-            for line in data_file:
-                push(line,[name +' has joined the room! ('+str(number_of_player)+')'])
-
-        # Acknowledge player that recently joined the room.
-        with open('db/registered.txt','a') as data_write:
-            data_write.write(userID+"\n")
-        replyStack.append('You have joined the room! ('+str(number_of_player)+')')
+    if words[0] in ['create', 'สร้าง', 'สร้างห้อง']:
+        new_id = ''.join(random.choice(string.ascii_lowercase + string.digits) for _ in range(5))
+        while room_model.find_one({'id': new_id}!=None):
+            new_id = ''.join(random.choice(string.ascii_lowercase + string.digits) for _ in range(5))
+        newroom_id = room_model.insert({'id': new_id, 'creator': name, 'status': 'waiting'})
+        room_map[userID] = new_id
+        replyStack.append('Your room id is : ' + new_id)
         reply(replyToken, replyStack)
         return 'OK',200
 
-    elif text in ['quit','เลิก','ออก','เลิกเล่น','ออกจากห้อง','พอ']:
+    elif words[0] in ['join','play','เล่น','เล่นด้วย']:
+        # Acknowledge all player that already in room.
+        if words.length == 1:
+            replyStack.append('Please specify a Room ID')
+            reply(replyToken, replyStack)
+            return 'OK',200
+        if room_model.find_one({'id': words[1]}) == None:
+            replyStack.append('This Room ID is invalid')
+            reply(replyToken, replyStack)
+            return 'OK',200
+        room_map[userID] = words[1]
+        number_of_player = countPlayer(words[1])+1
+        players_in_room = player_model.find({'room': words[1]})
+        for player in players_in_room:
+            push(player['user_id'],[name +' has joined the room : ' + words[1] + '! ('+str(number_of_player)+')'])
+
+        player_model.insert({'room': words[1], 'user_id': userID})
+        replyStack.append('You have joined the room : ' + words[1] + '! ('+str(number_of_player)+')')
+        reply(replyToken, replyStack)
+        return 'OK',200
+
+    elif words[0] in ['quit','เลิก','ออก','เลิกเล่น','ออกจากห้อง','พอ']:
         # Acknowledge all player that already in room.
         name = getProfiles(userID)['displayName']
         number_of_player = countPlayer()-1
@@ -116,7 +139,7 @@ def bot():
         reply(replyToken, replyStack)
         return 'OK',200
         
-    elif text == '!reset':
+    elif words[0] == '!reset':
         with open('db/registered.txt','r') as data_file:
             for line in data_file:
                 pushSticker(userID,"2","23")
@@ -124,7 +147,7 @@ def bot():
         open('db/registered.txt', 'w').close()
         return 'OK',200
 
-    elif text in ['ls','list','มีใครบ้าง','มีใครมั่ง']:
+    elif words[0] in ['ls','list','มีใครบ้าง','มีใครมั่ง']:
         lists = 'Users List\n'
         count = 0
         with open('db/registered.txt','r') as data_file:
@@ -143,7 +166,7 @@ def bot():
             lists += str(count) + ' user(s) in room.'
         reply(replyToken, [lists])
         return 'OK',200
-    elif text in ['go','เริ่ม','เริ่มเล่น','เริ่มเกม','แจกไพ่','แจกเลย','แจก']:
+    elif words[0] in ['go','เริ่ม','เริ่มเล่น','เริ่มเกม','แจกไพ่','แจกเลย','แจก']:
         number_of_player = countPlayer()
         if number_of_player < 5:
             pushSticker(userID,"1","107")
@@ -162,7 +185,7 @@ def bot():
                 push(line,['\uDBC0\uDC35 '+draw+' \uDBC0\uDC35', description[0], description[1]])
         open('db/registered.txt', 'w').close()
         return '0K',200
-    elif text in ['เล่นยังไง','ทำยังไง','อะไรวะ','เล่นไง','ทำไง','help','?']:
+    elif words[0] in ['เล่นยังไง','ทำยังไง','อะไรวะ','เล่นไง','ทำไง','help','?']:
         replyStack.append('\uDBC0\uDC77 How To Play?')
         replyStack.append('ผู้ที่ต้องการเล่นเกมให้พิมพ์คำว่า "เล่น" หรือ "join"')
         replyStack.append('ผู้ที่ต้องการออกจากเกมให้พิมพ์คำว่า "ออก" หรือ "quit"')
@@ -172,13 +195,8 @@ def bot():
     reply(replyToken, replyStack[:5])
     return 'OK',200
 
-def countPlayer():
-    count = 0
-    with open('db/registered.txt','r') as data_file:
-        for line in data_file:
-            if len(line) == 0:
-                continue
-            count += 1
+def countPlayer(roomId):
+    count = player_model.find({'room': roomId}).count()
     return count
  
 def getLockingStatus():
